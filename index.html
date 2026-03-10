@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Nightmare</title>
+    <style>
+        /* Tume küberpunk-teema / Dark cyberpunk theme */
+        body {
+            background-color: #050505;
+            color: #0ff;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        h1 {
+            text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* Neoonäärtega nupud ja paneelid / Neon bordered buttons and panels */
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 1000px;
+            padding: 15px;
+            border: 1px solid #f0f;
+            box-shadow: 0 0 10px #f0f inset, 0 0 10px #f0f;
+            background: rgba(20, 0, 20, 0.5);
+        }
+
+        button, label.upload-btn {
+            background: #111;
+            color: #0ff;
+            border: 2px solid #0ff;
+            padding: 10px 15px;
+            cursor: pointer;
+            text-transform: uppercase;
+            font-weight: bold;
+            box-shadow: 0 0 5px #0ff;
+            transition: 0.2s;
+            display: inline-block;
+        }
+
+        button:hover, label.upload-btn:hover {
+            background: #0ff;
+            color: #000;
+            box-shadow: 0 0 15px #0ff, 0 0 30px #0ff;
+        }
+
+        .effect-toggles {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            width: 100%;
+            margin-top: 15px;
+            border-top: 1px dashed #f0f;
+            padding-top: 15px;
+        }
+
+        .toggle {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .toggle input {
+            margin-right: 8px;
+            accent-color: #f0f;
+        }
+
+        canvas {
+            border: 2px solid #0f0;
+            box-shadow: 0 0 15px #0f0;
+            max-width: 90vw;
+            max-height: 70vh;
+            object-fit: contain;
+            cursor: crosshair;
+        }
+
+        .portfolio-link {
+            margin-top: 20px;
+            color: #f0f;
+            text-decoration: none;
+            font-size: 18px;
+            text-shadow: 0 0 5px #f0f;
+            margin-bottom: 20px;
+        }
+        
+        .portfolio-link:hover {
+            color: #fff;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Digital Nightmare</h1>
+
+    <div class="controls">
+        <button id="btn-camera">Lülita kaamera sisse</button>
+        <label class="upload-btn">
+            Laadi foto
+            <input type="file" id="file-upload" accept="image/*">
+        </label>
+        <button id="btn-save" style="border-color: #f00; color: #f00; box-shadow: 0 0 5px #f00;">Chaos Save</button>
+
+        <div class="effect-toggles">
+            <label class="toggle"><input type="checkbox" id="eff-rgb"> 1. RGB Split</label>
+            <label class="toggle"><input type="checkbox" id="eff-mosh"> 2. Datamoshing</label>
+            <label class="toggle"><input type="checkbox" id="eff-pixel"> 3. Pixel Sorting</label>
+            <label class="toggle"><input type="checkbox" id="eff-audio"> 4. Audio Distort</label>
+            <label class="toggle"><input type="checkbox" id="eff-scan"> 5. Scanlines</label>
+            <label class="toggle"><input type="checkbox" id="eff-vhs"> 6. VHS Noise</label>
+            <label class="toggle"><input type="checkbox" id="eff-mirror"> 7. Mirror Dim.</label>
+            <label class="toggle"><input type="checkbox" id="eff-freeze"> 8. Frame Freeze</label>
+            <label class="toggle"><input type="checkbox" id="eff-ascii"> 9. ASCII Mode</label>
+        </div>
+    </div>
+
+    <canvas id="main-canvas" width="800" height="600"></canvas>
+
+    <a href="../index.html" class="portfolio-link">&lt;&lt; Tagasi portfooliosse</a>
+
+    <script>
+        // === GLOBAALSED MUUTUJAD / GLOBAL VARIABLES ===
+        const canvas = document.getElementById('main-canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        
+        // Peidetud videosisend ja helianalüsaator
+        const video = document.createElement('video');
+        video.autoplay = true;
+        let img = new Image();
+        let sourceMode = 'none'; // 'video' või 'image'
+        
+        let audioCtx, analyser, dataArray;
+        let mouseX = canvas.width / 2;
+        let mouseY = canvas.height / 2;
+
+        // Puhver Canvas datamoshing'u jaoks / Buffer for Datamoshing
+        const bufferCanvas = document.createElement('canvas');
+        bufferCanvas.width = canvas.width;
+        bufferCanvas.height = canvas.height;
+        const bufferCtx = bufferCanvas.getContext('2d');
+
+        // Külmutatud kaadri salvestus / Stored frozen frame
+        let frozenImageData = null;
+
+        // === SÜNDMUSTE KUULAJAD / EVENT LISTENERS ===
+        
+        // Hiire jälgimine RGB Split efekti jaoks
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+            mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        });
+
+        // 1. Lülita kaamera sisse + Mikrofon (Audio Distortion jaoks)
+        document.getElementById('btn-camera').addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                video.srcObject = stream;
+                sourceMode = 'video';
+                
+                // Audio seadistamine
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                source.connect(analyser);
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                requestAnimationFrame(renderLoop);
+            } catch (err) {
+                alert("Kaamera või mikrofoni viga: " + err.message);
+            }
+        });
+
+        // Laadi foto funktsioon
+        document.getElementById('file-upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        sourceMode = 'image';
+                        // Säilitame proportsioonid ja kohandame canvast
+                        canvas.width = 800;
+                        canvas.height = 800 * (img.height / img.width);
+                        bufferCanvas.width = canvas.width;
+                        bufferCanvas.height = canvas.height;
+                        requestAnimationFrame(renderLoop);
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 10. Chaos Save
+        document.getElementById('btn-save').addEventListener('click', () => {
+            // Lisame juhusliku visuaalse artefakti enne salvestamist
+            ctx.fillStyle = `rgb(${Math.random()*255}, ${Math.random()*255}, ${Math.random()*255})`;
+            ctx.globalCompositeOperation = 'difference';
+            ctx.fillRect(Math.random() * canvas.width - 50, Math.random() * canvas.height - 50, 200, 200);
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // Laadime alla
+            const link = document.createElement('a');
+            link.download = 'digital_nightmare.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // === PÕHILINE RENDERDUSLOOP / MAIN RENDER LOOP ===
+        function renderLoop() {
+            if (sourceMode === 'none') return;
+
+            // Funktsioonide lülitite olekud
+            const effRGB = document.getElementById('eff-rgb').checked;
+            const effMosh = document.getElementById('eff-mosh').checked;
+            const effPixel = document.getElementById('eff-pixel').checked;
+            const effAudio = document.getElementById('eff-audio').checked;
+            const effScan = document.getElementById('eff-scan').checked;
+            const effVhs = document.getElementById('eff-vhs').checked;
+            const effMirror = document.getElementById('eff-mirror').checked;
+            const effFreeze = document.getElementById('eff-freeze').checked;
+            const effAscii = document.getElementById('eff-ascii').checked;
+
+            // Joonista algne allikas puhvrisse
+            if (sourceMode === 'video' && video.readyState === video.HAVE_ENOUGH_DATA) {
+                bufferCtx.drawImage(video, 0, 0, bufferCanvas.width, bufferCanvas.height);
+            } else if (sourceMode === 'image') {
+                bufferCtx.drawImage(img, 0, 0, bufferCanvas.width, bufferCanvas.height);
+            }
+
+            // 4. Audio-Reactive Distortion (Karjumine purustab pilti)
+            if (effAudio && analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                let volume = dataArray.reduce((a, b) => a + b) / dataArray.length; // Keskmine helitugevus
+                
+                if (volume > 30) {
+                    const sliceHeight = Math.random() * 50 + 10;
+                    const y = Math.random() * canvas.height;
+                    const shift = (Math.random() - 0.5) * volume * 2; // Sõltub helitugevusest
+                    bufferCtx.drawImage(bufferCanvas, 0, y, canvas.width, sliceHeight, shift, y, canvas.width, sliceHeight);
+                }
+            }
+
+            // 2. Datamoshing Lite (Venimine ja segunemine)
+            if (effMosh) {
+                ctx.globalAlpha = 0.15; // Joonistab uue kaadri õrnalt vana peale
+            } else {
+                ctx.globalAlpha = 1.0;
+            }
+            ctx.drawImage(bufferCanvas, 0, 0);
+            ctx.globalAlpha = 1.0; // Reset
+
+            // --- Pikslite manipulatsiooni blokk (getImageData on aeglane, teeme korraga) ---
+            if (effRGB || effPixel || effAscii || effFreeze) {
+                let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                let pixels = imgData.data;
+
+                // 8. Frame Freeze (Külmutab parema poole ekraanist)
+                if (effFreeze) {
+                    if (!frozenImageData || Math.random() < 0.05) { // Uuenda külmutust harva
+                        frozenImageData = ctx.getImageData(canvas.width / 2, 0, canvas.width / 2, canvas.height);
+                    }
+                    // Kopeeri külmutatud andmed tagasi
+                    for(let y=0; y<canvas.height; y++){
+                        for(let x=canvas.width/2; x<canvas.width; x++){
+                            let index = (y * canvas.width + x) * 4;
+                            let fIndex = (y * (canvas.width/2) + (x - canvas.width/2)) * 4;
+                            pixels[index] = frozenImageData.data[fIndex];
+                            pixels[index+1] = frozenImageData.data[fIndex+1];
+                            pixels[index+2] = frozenImageData.data[fIndex+2];
+                        }
+                    }
+                }
+
+                // 1. RGB Split (Nihutab värve hiire asukoha põhjal)
+                if (effRGB) {
+                    const offset = Math.floor((mouseX - canvas.width / 2) * 0.1);
+                    const tempPixels = new Uint8ClampedArray(pixels);
+                    for (let i = 0; i < pixels.length; i += 4) {
+                        // Punane kanal nihkub vasakule/paremale
+                        if (i + offset * 4 >= 0 && i + offset * 4 < pixels.length) {
+                            pixels[i] = tempPixels[i + offset * 4]; 
+                        }
+                        // Sinine kanal nihkub vastassuunas
+                        if (i - offset * 4 >= 0 && i - offset * 4 < pixels.length) {
+                            pixels[i + 2] = tempPixels[i + 2 - offset * 4]; 
+                        }
+                    }
+                }
+
+                // 3. Pixel Sorting (Sorteerib piksleid heledusastme järgi väikeses juhuslikus alas)
+                // Optimeeritud: teeme seda ainult väikesel ribal, et brauser kokku ei jookseks
+                if (effPixel) {
+                    const sortY = Math.floor(Math.random() * (canvas.height - 50));
+                    const sortH = 50;
+                    for (let y = sortY; y < sortY + sortH; y++) {
+                        let rowPixels = [];
+                        for (let x = 0; x < canvas.width; x++) {
+                            let idx = (y * canvas.width + x) * 4;
+                            let brightness = 0.34 * pixels[idx] + 0.5 * pixels[idx+1] + 0.16 * pixels[idx+2];
+                            rowPixels.push({r: pixels[idx], g: pixels[idx+1], b: pixels[idx+2], br: brightness});
+                        }
+                        // Sorteeri heledusastme järgi
+                        rowPixels.sort((a, b) => a.br - b.br);
+                        
+                        // Pane tagasi
+                        for (let x = 0; x < canvas.width; x++) {
+                            let idx = (y * canvas.width + x) * 4;
+                            pixels[idx] = rowPixels[x].r;
+                            pixels[idx+1] = rowPixels[x].g;
+                            pixels[idx+2] = rowPixels[x].b;
+                        }
+                    }
+                }
+
+                ctx.putImageData(imgData, 0, 0);
+
+                // 9. ASCII-mode (Muudab pildi maatriksiks)
+                // Tehakse peale pikslite tagasipanemist, et üle joonistada
+                if (effAscii) {
+                    const chars = ['@', '#', 'S', '%', '?', '*', '+', ';', ':', ',', '.'];
+                    const res = 10; // Ploki suurus
+                    ctx.fillStyle = "black";
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = "#0f0";
+                    ctx.font = "10px monospace";
+                    
+                    for (let y = 0; y < canvas.height; y += res) {
+                        for (let x = 0; x < canvas.width; x += res) {
+                            let i = (y * canvas.width + x) * 4;
+                            let r = pixels[i];
+                            let g = pixels[i+1];
+                            let b = pixels[i+2];
+                            let brightness = (r + g + b) / 3;
+                            let charIdx = Math.floor((brightness / 255) * (chars.length - 1));
+                            ctx.fillText(chars[charIdx], x, y);
+                        }
+                    }
+                }
+            }
+
+            // 7. Mirror Dimension (Kaleidoskoobi efekt, 4 sektorit)
+            if (effMirror) {
+                const w = canvas.width / 2;
+                const h = canvas.height / 2;
+                // Joonista peegeldus (parem ülemine)
+                ctx.save(); ctx.translate(canvas.width, 0); ctx.scale(-1, 1); ctx.drawImage(canvas, 0, 0, w, h, 0, 0, w, h); ctx.restore();
+                // Joonista peegeldus (alumine vasak)
+                ctx.save(); ctx.translate(0, canvas.height); ctx.scale(1, -1); ctx.drawImage(canvas, 0, 0, w, h, 0, 0, w, h); ctx.restore();
+                // Joonista peegeldus (alumine parem)
+                ctx.save(); ctx.translate(canvas.width, canvas.height); ctx.scale(-1, -1); ctx.drawImage(canvas, 0, 0, w, h, 0, 0, w, h); ctx.restore();
+            }
+
+            // 5. Scanline Overlay (Kineskoopteleri ribad)
+            if (effScan) {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+                for (let i = 0; i < canvas.height; i += 4) {
+                    ctx.fillRect(0, i, canvas.width, 1);
+                }
+            }
+
+            // 6. VHS Noise (Staatiline müra)
+            if (effVhs) {
+                ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+                for (let i = 0; i < 1000; i++) {
+                    const nx = Math.random() * canvas.width;
+                    const ny = Math.random() * canvas.height;
+                    const ns = Math.random() * 3;
+                    ctx.fillRect(nx, ny, ns, ns);
+                }
+            }
+
+            // Järgmine kaader
+            requestAnimationFrame(renderLoop);
+        }
+    </script>
+</body>
+</html>
